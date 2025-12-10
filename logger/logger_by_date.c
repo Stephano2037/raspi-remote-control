@@ -4,8 +4,9 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include "../common.h"
 
-#define LOG_DIR "logs"
+
 
 //로그 레벨
 typedef enum {
@@ -14,11 +15,7 @@ typedef enum {
     LOG_ERROR
 }LogLevel;
 
-#define DATE_STRING_FORMAT_SIZE 11 //include null
-#define LOG_TIME_FORMAT_SIZE 20
-#define MAXBUFFER (255+1)
 
-#define LOG_COMMAND_START_INDEX 3
 
 const char* level_to_string(LogLevel level) {
     switch (level) {
