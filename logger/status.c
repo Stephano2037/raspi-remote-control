@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>     // for sleep()
 #include <sys/statvfs.h> // for disk usage
+#include <pthread.h>
 
 #include "../common.h"
 
@@ -23,6 +24,25 @@ typedef struct {
     long idle;
 } CpuTimes;
 
+#include <pthread.h>
+#include <sys/statvfs.h> 
+
+
+// define share data struct for result of all threads
+typedef struct {
+    float cpu_usage;
+    
+    long mem_used_mb;
+    long mem_total_mb;
+    float mem_percent;
+
+    long disk_used_gb;
+    long disk_total_gb;
+    long disk_percent;
+
+    float temp;
+}SystemStatus;
+
 // /proc/meminfo 파일 파싱해서 메모리 정보 가져오기
 int get_memory_info(MemInfo *mem) {
     FILE *fp = fopen("/proc/meminfo", "r");
@@ -31,7 +51,7 @@ int get_memory_info(MemInfo *mem) {
         return -1;
     }
 
-    char line[256];
+    char line[256]={0,};
     while (fgets(line, sizeof(line), fp)) {
         if (sscanf(line, "MemTotal: %ld kB", &mem->total) == 1) continue;
         if (sscanf(line, "MemFree: %ld kB", &mem->free) == 1) continue;
@@ -63,25 +83,29 @@ int get_cpu_times(CpuTimes *cpu) {
 
 
 // CPU 사용률 계산하기
-float calculate_cpu_usage(void) {
-    CpuTimes prev, curr;
+void *thread_cpu(void *arg) {
+    SystemStatus *status = (SystemStatus*) arg;
 
-    if (get_cpu_times(&prev) != 0) return -1.0f;
+    CpuTimes prev={0,};
+    CpuTimes curr={0,};
+
+    if (get_cpu_times(&prev) != 0) {status->cpu_usage = -1.0; return NULL;}
     sleep(1); // 1초 대기
-    if (get_cpu_times(&curr) != 0) return -1.0f;
+    if (get_cpu_times(&curr) != 0) {status->cpu_usage = -1.0; return NULL;}
 
-    long prev_idle = prev.idle;
-    long curr_idle = curr.idle;
+    unsigned long long prev_idle = prev.idle;
+    unsigned long long curr_idle = curr.idle;
     
-    long prev_total = prev.user + prev.nice + prev.system + prev.idle;
-    long curr_total = curr.user + curr.nice + curr.system + curr.idle;
+    unsigned long long prev_total = prev.user + prev.nice + prev.system + prev.idle;
+    unsigned long long curr_total = curr.user + curr.nice + curr.system + curr.idle;
 
-    long total_diff = curr_total - prev_total;
-    long idle_diff = curr_idle - prev_idle;
+    unsigned long long total_diff = curr_total - prev_total;
+    unsigned long long idle_diff = curr_idle - prev_idle;
 
-    if (total_diff == 0) return 0.0f;
+    if (total_diff == 0) status->cpu_usage=0.0f;
+    else status->cpu_usage = 100.0f * (total_diff-idle_diff) / total_diff;
 
-    return 100.0f * (total_diff - idle_diff) / total_diff;
+    return NULL;
 }
 
 
@@ -132,13 +156,23 @@ float get_temperature(void) {
 int main() {
     printf("===== Raspberry Pi Status =====\n");
 
+    pthread_t t1=0;
+    SystemStatus status={0,}; 
+
+    pthread_create(&t1,NULL,thread_cpu,&status);
+
     // 1. CPU
-    float cpu_usage = calculate_cpu_usage();
-    if (cpu_usage >= 0) {
-        printf("CPU Usage : %.1f%%\n", cpu_usage);
-    } else {
-        printf("CPU Usage : N/A\n");
-    }
+    pthread_join(t1,NULL);
+    
+    if(status.cpu_usage>0) printf("CPU Usage: %1.f%%\n",status.cpu_usage);
+    else printf("CPU Usage: N/A\n");
+
+    // float cpu_usage = calculate_cpu_usage();
+    // if (cpu_usage >= 0) {
+    //     printf("CPU Usage : %.1f%%\n", cpu_usage);
+    // } else {
+    //     printf("CPU Usage : N/A\n");
+    // }
 
     // 2. Memory
     MemInfo mem;
