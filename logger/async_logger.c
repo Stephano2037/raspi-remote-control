@@ -8,7 +8,9 @@
 #include <stdarg.h>
 
 #define MAX_LOG_LENGTH 256 // 로그 메세지 최대 길이
-#define QUEUE_SIZE 100 // 대기열 크기 
+// #define QUEUE_SIZE 100 // 대기열 크기 
+#define QUEUE_SIZE 5 // 대기열 크기 
+#define FILE_NAME ("async_log_1.txt")
 
 //자료구조 로그 큐
 typedef struct {
@@ -20,6 +22,7 @@ typedef struct {
     pthread_mutex_t lock; 
     pthread_cond_t not_empty; //큐가 비어있지 않음 공지 신호
     pthread_cond_t not_full; //큐가 다 차지 않음을 공지하는 신호 
+    
 }LogQueue;
 
 LogQueue g_log_queue ={0,};
@@ -43,9 +46,10 @@ void async_log(const char* format,...) {
     //큐가 full -> 오래된 로그 버리기 or empty 선택 
     // 현재는 꽉차면 삭제 진행 
     if(g_log_queue.count >=QUEUE_SIZE) {
-        printf("[WARN] Log Queue Full! Drop Message\n");
-        pthread_mutex_unlock(&g_log_queue.lock);
-        return; 
+        printf("[WARN] Log Queue Full! Waiting for space\n");
+        pthread_cond_wait(&g_log_queue.not_full, &g_log_queue.lock);
+        //pthread_mutex_unlock(&g_log_queue.lock);
+       // return; 
     }
 
     //메세지 포맷팅
@@ -72,7 +76,7 @@ void async_log(const char* format,...) {
 //소비자 백그라운드 로그 스레드
 
 void *consumer_logger_thread_func(void* arg) {
-    FILE *fp = fopen("async_log.txt","a");
+    FILE *fp = fopen(FILE_NAME,"a");
     if(!fp) {
         perror("fopen \n");
         return NULL;
@@ -101,6 +105,9 @@ void *consumer_logger_thread_func(void* arg) {
         g_log_queue.front = (g_log_queue.front+1) % QUEUE_SIZE;
         g_log_queue.count--;
 
+        // 데이터 꺼내면 빈자리 생김 -> 생산자 깨우기
+        // 대기중인 async_log 함수가 있으면 여기서 깨어남
+        pthread_cond_signal(&g_log_queue.not_full);
         pthread_mutex_unlock(&g_log_queue.lock); //큐 조작 완료 후 lock 해제
     
         //실제 파일쓰기 ()
@@ -122,7 +129,7 @@ int main() {
 
     printf("Main Start generating logs...\n");
 
-    for(int i=0; i<QUEUE_SIZE; ++i) {
+    for(int i=0; i<1000; ++i) {
         async_log("[INFO] Log message number %d",i);
         usleep(10000); //매 10ms 마다 로그 쓰기 (100회)
     }//end of for
@@ -136,6 +143,11 @@ int main() {
 
     // 로그 스레드에서 남은 큐 drop 대기 
     pthread_join(log_thread,NULL);
+
+    //자원 해제
+    pthread_mutex_destroy(&g_log_queue.lock);
+    pthread_cond_destroy(&g_log_queue.not_empty);
+    pthread_cond_destroy(&g_log_queue.not_full);
 
     printf("Main: ALL Done\n");
     return 0;
