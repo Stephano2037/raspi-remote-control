@@ -85,6 +85,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    printf("show original message: %s\n",message);
+
     int result = append_log(message);
     free(message);
 
